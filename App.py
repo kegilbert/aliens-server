@@ -61,7 +61,7 @@ def handle_incoming(data):
     curr_time = datetime.datetime.now().timestamp()
     tiles_df = pd.DataFrame(data=tile_table_data)
     tiles_df.to_sql(f'{map_name}_tiles', db, if_exists='replace', index=False)
-    map_df   = pd.DataFrame(data={'name': [map_name], 'tiles': [f'{map_name}_tiles'], **data['meta'], 'timestamp': curr_time})
+    map_df   = pd.DataFrame(data={'name': [map_name], 'tiles': [f'{map_name}_tiles'], **data['meta'], 'user': data['user'], 'timestamp': curr_time})
     print(map_df)
     print(tiles_df)
 
@@ -88,13 +88,13 @@ def get_map_list(data):
     db = sqlite3.connect('aliens.db')
     db.row_factory = row_to_dict
     db_cursor = db.cursor()
-    maps = db_cursor.execute('SELECT * FROM maps').fetchall()
+    maps = db_cursor.execute('SELECT * FROM maps ORDER BY timestamp DESC').fetchall()
 
     map_list = []
 
     for _map in maps:
         meta = {k: _map[k] for k in _map.keys() - {'name', 'tiles'}}
-        tiles = db_cursor.execute(f'SELECT * FROM {_map["name"]}_tiles').fetchall()
+        tiles = db_cursor.execute(f'SELECT * FROM "{_map["name"]}_tiles"').fetchall()
         map_list.append({
             'label': _map['name'],
             'value': {
