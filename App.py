@@ -1,12 +1,15 @@
 import sqlite3
 import json
 import datetime
+import random
+import string
 
 import pandas as pd
 
-from flask import Flask, render_template, jsonify
+from pprint import pprint
+from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, send, emit
-from flask_cors import CORS
+from flask_cors import CORS, cross_origin
 
 
 ###############################################################################
@@ -15,7 +18,7 @@ from flask_cors import CORS
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'aliens'
 CORS(app)
-socketio = SocketIO(app, ping_interval=60, cors_allowed_origins="*")
+socketio = SocketIO(app, ping_interval=60, cors_allowed_origins="*", engineio_logger=False)
 
 ###############################################################################
 #   Local Database Management Globals
@@ -46,7 +49,6 @@ def handle_incoming(data):
 
 @socketio.on('save')
 def handle_incoming(data):
-    print(f'Save: {data}')
     db = sqlite3.connect('aliens.db')
     db_cursor = db.cursor()
     map_name = data['mapName']
@@ -62,8 +64,6 @@ def handle_incoming(data):
     tiles_df = pd.DataFrame(data=tile_table_data)
     tiles_df.to_sql(f'{map_name}_tiles', db, if_exists='replace', index=False)
     map_df   = pd.DataFrame(data={'name': [map_name], 'tiles': [f'{map_name}_tiles'], **data['meta'], 'user': data['user'], 'timestamp': curr_time})
-    print(map_df)
-    print(tiles_df)
 
     map_df.to_sql('maps', db, if_exists='append', index=False)
 
@@ -103,9 +103,77 @@ def get_map_list(data):
             }
         })
 
-    print(map_list)
     emit('emitMapList', map_list)
 
 
+@socketio.on('getLobbies')
+def get_lobbies(data):
+    db = sqlite3.connect('aliens.db')
+    db.row_factory = row_to_dict
+    db_cursor = db.cursor()
+
+    lobbies = db_cursor.execute('SELECT * FROM Lobbies ORDER BY timestamp DESC').fetchall()
+    lobbies_list = []
+
+    for lobby in lobbies:
+        lobbies_list.append({
+            'lobbyId': lobby['lobbyID'],
+            'lobbyName': lobby['name'],
+            'numPlayers': len(lobby['playerList'].split(',')),
+            'players': [{'playerName': player, 'playerReady': False} for player in lobby['playerList'].split(',')],
+            'private': lobby['password'] != '',
+            #'password': lobby['password']
+        })
+
+    emit('lobbiesList', lobbies_list)
+
+
+@socketio.on('createLobby')
+def create_lobby(data):
+    db = sqlite3.connect('aliens.db')
+    db.row_factory = row_to_dict
+    db_cursor = db.cursor()   
+
+    curr_time = datetime.datetime.now().timestamp()
+    lobby_df = pd.DataFrame(data={
+      'lobbyID': data['lobbyId'],
+      'name': data['lobbyName'],
+      'password': data['lobbyPW'],
+      'map': '',
+      'playerList': f'{data["creatorPlayer"]}',
+      'timestamp': curr_time
+    }, index=[0])
+
+    lobby_df.to_sql(f'Lobbies', db, if_exists='append', index=False)
+
+    get_lobbies({})
+
+
+@socketio.on('setLobbyMap')
+def set_lobby_map(data):
+    db = sqlite3.connect('aliens.db')
+    db.row_factory = row_to_dict
+    db_cursor = db.cursor()
+
+    db.execute(f'UPDATE Lobbies SET map = "{data["map"]["label"]}" WHERE lobbyID = "{data["lobbyId"]}"')
+    db.commit()
+
+
+###############################################################################
+#   Static HTTP Endpoints
+###############################################################################
+@app.route('/check_lobby_password', methods=['POST'])
+@cross_origin()
+def check_lobby_pw():
+    data = request.json  
+    db = sqlite3.connect('aliens.db')
+    db.row_factory = row_to_dict
+    db_cursor = db.cursor()  
+
+    lobby = db.execute(f'SELECT password from Lobbies WHERE lobbyID = "{data["lobbyId"]}"').fetchone()
+
+    return jsonify(status=lobby['password'] == data['pw']), 200
+
+
 if __name__ == '__main__':
-    socketio.run(app, '0.0.0.0', port=5000)
+    socketio.run(app, '0.0.0.0', port=5069)
