@@ -21,43 +21,48 @@ import __main__ as App
 
 
 #################################################################
-#		Internal Methods
+#       Globals
 #################################################################
 active_lobby_ids = []
 active_user_ids  = []
+game_sessions = {}
 
+
+#################################################################
+#       Internal Methods
+#################################################################
 def register_room(room_id, id_type):
-	global active_lobby_ids, active_user_ids
-	
-	join_room(room_id)
-	lobby_list = active_user_ids if id_type == 'user' else active_lobby_ids
-	lobby_list.append(room_id)
+    global active_lobby_ids, active_user_ids
+    
+    join_room(room_id)
+    lobby_list = active_user_ids if id_type == 'user' else active_lobby_ids
+    lobby_list.append(room_id)
 
-	print(f'=== [{id_type}] ===')
-	pprint(lobby_list)
+    print(f'=== [{id_type}] ===')
+    pprint(lobby_list)
 
 
 def unregister_room(room_id, id_type):
-	global active_lobby_ids, active_user_ids
-	
-	close_room(room_id)
-	lobby_list = active_user_ids if id_type == 'user' else active_lobby_ids
-	lobby_list.remove(room_id)
+    global active_lobby_ids, active_user_ids
+    
+    close_room(room_id)
+    lobby_list = active_user_ids if id_type == 'user' else active_lobby_ids
+    lobby_list.remove(room_id)
 
-	print(f'=== [{id_type}] ===')
-	pprint(lobby_list)
+    print(f'=== [{id_type}] ===')
+    pprint(lobby_list)
 
 #################################################################
-#		Lobby Socket Endpoints
+#       Lobby Socket Endpoints
 #################################################################
 @App.socketio.on('createLobby')
 def new_lobby(data):
-	print('=== NEW LOBBY ===')
-	register_room(data['lobbyId'], 'lobby')
-	register_room(data['creatorPlayer'], 'user')
+    print('=== NEW LOBBY ===')
+    register_room(data['lobbyId'], 'lobby')
+    register_room(data['creatorPlayer'], 'user')
 
 
-	App.lobbies.append({
+    App.lobbies.append({
             'lobbyId':data['lobbyId'],
             'lobbyName': data['lobbyName'],
             'numPlayers': 1,
@@ -67,99 +72,133 @@ def new_lobby(data):
             'private': data['lobbyPW'] != ''
         })
 
-	if data['lobbyPW'] != '':
-		App.lobbyPWs[data['lobbyId']] = data['lobbyPW']
+    if data['lobbyPW'] != '':
+        App.lobbyPWs[data['lobbyId']] = data['lobbyPW']
 
-	App.socketio.emit('lobbiesList', App.lobbies, include_self=True, broadcast=True )
+    App.socketio.emit('lobbiesList', App.lobbies, include_self=True, broadcast=True )
 
 
 @App.socketio.on('joinLobby')
 def join_lobby(data):
-	#join_room(data['roomCode'])
-	#join_room(data['userID'])
-	register_room(data['roomCode'], 'lobby')
-	register_room(data['userID'], 'user')
+    #join_room(data['roomCode'])
+    #join_room(data['userID'])
+    register_room(data['roomCode'], 'lobby')
+    register_room(data['userID'], 'user')
 
-	lobbyID = data['roomCode']
-	lobby_idx, lobby = App.lobby_lookup_by_id(lobbyID)
-	
-	App.lobbies[lobby_idx]['players'].append({'playerName': data['userID'], 'playerReady': False})
-	App.lobbies[lobby_idx]['numPlayers'] = len(App.lobbies[lobby_idx]['players'])
+    lobbyID = data['roomCode']
+    lobby_idx, lobby = App.lobby_lookup_by_id(lobbyID)
+    
+    App.lobbies[lobby_idx]['players'].append({'playerName': data['userID'], 'playerReady': False})
+    App.lobbies[lobby_idx]['numPlayers'] = len(App.lobbies[lobby_idx]['players'])
 
-	App.socketio.emit('lobbiesList', App.lobbies)
-	#App.socketio.emit('lobbyPlayerJoin', {'playerName': data['userID']})
+    App.socketio.emit('lobbiesList', App.lobbies)
+    #App.socketio.emit('lobbyPlayerJoin', {'playerName': data['userID']})
 
 
 @App.socketio.on('leaveLobby')
 def leave_lobby(data):
-	unregister_room(data['player']['playerName'], 'user')
+    unregister_room(data['player']['playerName'], 'user')
 
-	lobbyID = data['roomCode']
-	lobby_idx, lobby = App.lobby_lookup_by_id(lobbyID)
-	
-	App.lobbies[lobby_idx]['players'].remove(data['player'])
-	App.lobbies[lobby_idx]['numPlayers'] = len(App.lobbies[lobby_idx]['players'])
+    lobbyID = data['roomCode']
+    lobby_idx, lobby = App.lobby_lookup_by_id(lobbyID)
+    
+    App.lobbies[lobby_idx]['players'].remove(data['player'])
+    App.lobbies[lobby_idx]['numPlayers'] = len(App.lobbies[lobby_idx]['players'])
 
-	App.socketio.emit('lobbiesList', App.lobbies)
-	#App.socketio.emit('lobbyPlayerLeave', {'playerName': data['player']['playerName']})	
+    App.socketio.emit('lobbiesList', App.lobbies)
+    #App.socketio.emit('lobbyPlayerLeave', {'playerName': data['player']['playerName']})    
 
 
 @App.socketio.on('gameStart')
 def game_start(data):
-	print('=== GAME START ===')
-	print(data)
+    global game_sessions
 
-	join_room(data['roomCode'])
+    print('=== GAME START ===')
+    print(data)
 
-	#t = threading.Thread(target=game_engine, args=(data['roomCode'], data['players']))
-	#t.start()
-	App.socketio.start_background_task(game_engine, room_id=data['roomCode'], players=data['players'])
+    join_room(data['roomCode'])
 
-	App.socketio.emit('gameStartResp', broadcast=True, include_self=True, room=data['roomCode'])
+    #t = threading.Thread(target=game_engine, args=(data['roomCode'], data['players']))
+    #t.start()
+    App.socketio.start_background_task(game_engine, room_id=data['roomCode'], players=data['players'])
+
+    App.socketio.emit('gameStartResp', broadcast=True, include_self=True, room=data['roomCode'])
 
 
 #################################################################
-#		Game Session Endpoints
+#       Game Session Endpoints
 #################################################################
 @App.socketio.on('tileClick')
 def on_tile_click(data):
-	App.socketio.emit('playerEvent', {'event': f'YOU CLICKED ON {data["tile"]}'}, room=data['playerId'])
-	App.socketio.emit('playerEvent', {'event': f'PLAYER {data["playerId"]} CLICKED ON <REDACTED>'}, room=data['lobbyId'], broadcast=True)
+    App.socketio.emit('playerEvent', {'event': f'YOU CLICKED ON {data["tile"]}'}, room=data['playerId'])
+    App.socketio.emit('playerEvent', {'event': f'PLAYER {data["playerId"]} CLICKED ON <REDACTED>'}, room=data['lobbyId'], broadcast=True)
 
 
 @App.socketio.on('turnSubmit')
 def turn_submit(data):
-	print(data)
-	App.socketio.emit('playerEvent', {'state': 'Private message just for you!'}, broadcast=False)
-	App.socketio.emit('roomEvent', {'state': f'{data["player"]} has moved'}, broadcast=True, room=data['roomCode'])
+    print(data)
+    App.socketio.emit('playerEvent', {'state': 'Private message just for you!'}, broadcast=False)
+    App.socketio.emit('roomEvent', {'state': f'{data["player"]} has moved'}, broadcast=True, room=data['roomCode'])
 
 
 def game_engine(room_id, players):
-	try:
-		# Randomize turn order
-		random.shuffle(players)
-		num_players = len(players)
-		role_div = math.floor(num_players / 2) + (num_players % 2)
+    try:
+        global game_sessions
 
-		# Assign roles to players
-		# 50/50 aliens/humans, majority aliens in case of odd number of players
-		roles = ['alien' if i < role_div else 'human' for i in range(0, num_players)]
-		random.shuffle(roles)
+        # Randomize turn order
+        random.shuffle(players)
+        num_players = len(players)
+        role_div = math.floor(num_players / 2) + (num_players % 2)
 
-		for player in players:
-			player['role'] = roles.pop()
-			App.socketio.emit('roleAssignment', {'role': player['role']}, room=player['playerName'])
+        # Assign roles to players
+        # 50/50 aliens/humans, majority aliens in case of odd number of players
+        roles = ['alien' if i < role_div else 'human' for i in range(0, num_players)]
+        random.shuffle(roles)
 
-		# Start
-		pprint(players)
-		print('=======================')
-		pprint(App.socketio.server.rooms)
+        for player in players:
+            player['role'] = roles.pop()
+            App.socketio.emit('roleAssignment', {'role': player['role']}, room=player['playerName'])
 
-		while True:
-			# Individual game, game start kicks off new thread running this function loop
-			print(f'[{room_id}] PING')
-			sleep(30)
-	except KeyboardInterrupt:
-		exit(0)
+
+        lobby_idx, lobby = App.lobby_lookup_by_id(room_id)
+        map_label = lobby['mapLabel']
+        db = sqlite3.connect('aliens.db')
+        db.row_factory = App.row_to_dict
+        db_cursor = db.cursor()
+        map_info = db_cursor.execute(f'SELECT * FROM maps WHERE name="{map_label}" ORDER BY timestamp DESC').fetchone()
+
+        tiles = db_cursor.execute(f'SELECT * FROM "{map_info["name"]}_tiles"').fetchall()
+        map_tiles = {tiles[i]['tile']: {k: tiles[i][k] for k in tiles[i].keys() - {'tile'}} for i in range(0, len(tiles))}
+
+        aspawn = [key for key, value in map_tiles.items() if value['tileType'] == 'aspawn'][0]
+        hspawn = [key for key, value in map_tiles.items() if value['tileType'] == 'hspawn'][0]
+
+        game_sessions[room_id] = {
+            'map': {
+                'info': map_info,
+                'tiles': map_tiles,
+                'aspawn': aspawn,
+                'hspawn': hspawn
+            },
+            'players': [{
+                'id':  player['playerName'],
+                'pos': aspawn if player['role'] == 'alien' else hspawn,
+                'status': 'alive'
+            } for player in players]
+        }
+
+        pprint(game_sessions)
+
+        # Start
+        pprint(players)
+        print('=======================')
+        pprint(App.socketio.server.rooms)
+
+        while True:
+            # Individual game, game start kicks off new thread running this function loop
+            print(f'[{room_id}] PING')
+            sleep(30)
+    except KeyboardInterrupt:
+        exit(0)
 
 
