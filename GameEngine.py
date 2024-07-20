@@ -75,7 +75,9 @@ def new_lobby(data):
     if data['lobbyPW'] != '':
         App.lobbyPWs[data['lobbyId']] = data['lobbyPW']
 
-    App.socketio.emit('lobbiesList', App.lobbies, include_self=True, broadcast=True )
+    #App.socketio.emit('lobbiesList', App.lobbies, include_self=True, broadcast=True )
+    App.socketio.emit('lobbiesList', App.lobbies)
+    App.socketio.emit('joinCreatorToLobby', {'lobbyId': data['lobbyId']}, to=data['creatorPlayer'])
 
 
 @App.socketio.on('joinLobby')
@@ -122,7 +124,29 @@ def game_start(data):
     #t.start()
     App.socketio.start_background_task(game_engine, room_id=data['roomCode'], players=data['players'])
 
-    App.socketio.emit('gameStartResp', broadcast=True, include_self=True, room=data['roomCode'])
+    #App.socketio.emit('gameStartResp', broadcast=True, include_self=True, room=data['roomCode'])
+    App.socketio.emit('gameStartResp', to=data['roomCode'])
+
+
+
+#################################################################
+#       User Session Endpoints
+#################################################################
+@App.socketio.on('disconnect')
+def disconnect():
+    user_name = App.users.inverse[request.sid]
+
+    print(f'User {user_name} Disconnecting')
+    unregister_room(user_name, 'user')
+
+    for lobby_idx, lobby in enumerate(App.lobbies):
+        players = [player['playerName'] for player in lobby['players']]
+        if user_name in players:
+            player_idx = players.index(user_name)
+            del App.lobbies[lobby_idx]['players'][player_idx]
+
+    del App.users.inverse[request.sid]
+    App.socketio.emit('lobbiesList', App.lobbies)
 
 
 #################################################################
@@ -130,15 +154,16 @@ def game_start(data):
 #################################################################
 @App.socketio.on('tileClick')
 def on_tile_click(data):
-    App.socketio.emit('playerEvent', {'event': f'YOU CLICKED ON {data["tile"]}'}, room=data['playerId'])
-    App.socketio.emit('playerEvent', {'event': f'PLAYER {data["playerId"]} CLICKED ON <REDACTED>'}, room=data['lobbyId'], broadcast=True)
+    App.socketio.emit('playerEvent', {'event': f'YOU CLICKED ON {data["tile"]}'}, to=data['playerId'])
+    App.socketio.emit('playerEvent', {'event': f'PLAYER {data["playerId"]} CLICKED ON <REDACTED>'}, to=data['lobbyId'])
+    #App.socketio.emit('playerEvent', {'event': f'PLAYER {data["playerId"]} CLICKED ON <REDACTED>'}, room=data['lobbyId'], broadcast=True)
 
 
 @App.socketio.on('turnSubmit')
 def turn_submit(data):
     print(data)
-    App.socketio.emit('playerEvent', {'state': 'Private message just for you!'}, broadcast=False)
-    App.socketio.emit('roomEvent', {'state': f'{data["player"]} has moved'}, broadcast=True, room=data['roomCode'])
+    #App.socketio.emit('playerEvent', {'state': 'Private message just for you!'}, broadcast=False)
+    #App.socketio.emit('roomEvent', {'state': f'{data["player"]} has moved'}, broadcast=True, room=data['roomCode'])
 
 
 def game_engine(room_id, players):
@@ -155,11 +180,6 @@ def game_engine(room_id, players):
         roles = ['alien' if i < role_div else 'human' for i in range(0, num_players)]
         random.shuffle(roles)
 
-        for player in players:
-            player['role'] = roles.pop()
-            App.socketio.emit('roleAssignment', {'role': player['role']}, room=player['playerName'])
-
-
         lobby_idx, lobby = App.lobby_lookup_by_id(room_id)
         map_label = lobby['mapLabel']
         db = sqlite3.connect('aliens.db')
@@ -173,6 +193,14 @@ def game_engine(room_id, players):
         aspawn = [key for key, value in map_tiles.items() if value['tileType'] == 'aspawn'][0]
         hspawn = [key for key, value in map_tiles.items() if value['tileType'] == 'hspawn'][0]
 
+        for player in players:
+            role = roles.pop()
+            player['role'] = role
+            player['pos'] = aspawn if role == 'alien' else hspawn
+            #player['status'] = 'alive'
+
+            App.socketio.emit('roleAssignment', {'player': player}, to=player['playerName'])
+
         game_sessions[room_id] = {
             'map': {
                 'info': map_info,
@@ -180,11 +208,12 @@ def game_engine(room_id, players):
                 'aspawn': aspawn,
                 'hspawn': hspawn
             },
-            'players': [{
-                'id':  player['playerName'],
-                'pos': aspawn if player['role'] == 'alien' else hspawn,
-                'status': 'alive'
-            } for player in players]
+            'players': players
+            # 'players': [{
+            #     'id':  player['playerName'],
+            #     'pos': aspawn if player['role'] == 'alien' else hspawn,
+            #     'status': 'alive'
+            # } for player in players]
         }
 
         pprint(game_sessions)

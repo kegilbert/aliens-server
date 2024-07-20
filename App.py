@@ -8,6 +8,8 @@ import logging
 import pandas as pd
 
 from pprint import pprint
+from bidict import bidict # Allow 2-way mapping (bijective) of user session and user names
+
 from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, send, emit
 from flask_cors import CORS, cross_origin
@@ -36,7 +38,7 @@ lobbies = [{
             'private': False,
         }]
 lobbyPWs = {}
-users = {}
+users = bidict({})
 
 def lobby_lookup_by_id(request_id):
     lobby = None
@@ -70,7 +72,7 @@ def handle_json(json):
 @socketio.on('incoming')
 def handle_incoming(data):
     print(f'Incoming: {data}')
-    emit('responseMessage', data, broadcast=True)
+    emit('responseMessage', data) #, broadcast=True)
 
 
 @socketio.on('save')
@@ -101,11 +103,6 @@ def handle_incoming(data):
 
 
     db.commit()
-
-
-@socketio.on('client_disconnecting')
-def disconnect_details(data):
-    print(f'{data["username"]} user disconnected.')
 
 
 @socketio.on('getMapList')
@@ -179,17 +176,23 @@ def set_lobby_map(data):
     lobbies[lobby_idx]['mapLabel'] = data['mapLabel']
 
     pprint(lobbies)
-    socketio.emit('lobbiesList', lobbies, broadcast=True, room=data['lobbyId'])   
+    #socketio.emit('lobbiesList', lobbies, broadcast=True, room=data['lobbyId'])
+    socketio.emit('lobbiesList', lobbies, to=data['lobbyId'])
 
 
 @socketio.on('registerUsername')
 def register_username(data):
-    new_user = data['username']
-    if new_user in users.keys():
+    new_username = data['username']
+    if new_username in users.keys():
         emit('usernameUnavailable', {})
+        return
+    elif request.sid in users.values():
+        users.inverse[request.sid] = new_username
     else:
-        users[new_user] = {'user': new_user}
-        emit('usernameRegistered', {})
+        users[new_username] = request.sid
+
+    pprint(users)
+    emit('usernameRegistered', {}, to=request.sid)
 
 
 @socketio.on('registerPlayerReadyState')
@@ -205,7 +208,8 @@ def register_player_ready_state(data):
 
     #emit('lobbyPlayerReadyUpdate', {'playerIdx': player_idx, 'playerReady': data['playerReady']})
     pprint(lobbies)
-    socketio.emit('lobbiesList', lobbies, include_self=True, broadcast=True, room=data['lobbyId'])
+    socketio.emit('lobbiesList', lobbies, to=data['lobbyId'])
+    #socketio.emit('lobbiesList', lobbies, include_self=True, broadcast=True, room=data['lobbyId'])
 
 
 ###############################################################################
