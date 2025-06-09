@@ -162,8 +162,8 @@ def on_tile_click(data):
 @App.socketio.on('turnSubmit')
 def turn_submit(data):
     print(data)
-    #App.socketio.emit('playerEvent', {'state': 'Private message just for you!'}, broadcast=False)
-    #App.socketio.emit('roomEvent', {'state': f'{data["player"]} has moved'}, broadcast=True, room=data['roomCode'])
+    App.socketio.emit('playerEvent', {'state': 'Private message just for you!'}, broadcast=False, room=data['lobbyId'], to=data['playerId'])
+    App.socketio.emit('roomEvent', {'state': f'{data["playerId"]} has moved'}, broadcast=True, room=data['lobbyId'], to=data['lobbyId'])
 
 
 def game_engine(room_id, players):
@@ -197,6 +197,8 @@ def game_engine(room_id, players):
             role = roles.pop()
             player['role'] = role
             player['pos'] = aspawn if role == 'alien' else hspawn
+            player['maxMovement'] = 2 if role == 'alien' else 1
+            player['kills'] = 0
             #player['status'] = 'alive'
 
             App.socketio.emit('roleAssignment', {'player': player}, to=player['playerName'])
