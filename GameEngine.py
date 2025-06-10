@@ -166,13 +166,31 @@ def turn_submit(data):
         if len(game['danger_cards']) == 0:
             game['danger_cards'] = ['noise', 'any'] * 27
             random.shuffle(game['danger_cards'])
+            App.socketio.emit('roomEvent', {'state': 'deckShuffled'}, broadcast=True, room=data['lobbyId'], to=data['lobbyId'])
 
         card = game['danger_cards'].pop()
+        if 'silence' in card:
+            game['players'][data['playerId']]['numHeldCards'] += 1
     else:
         card = 'silence'
 
-    App.socketio.emit('playerEvent', {'state': card}, broadcast=False, room=data['lobbyId'], to=data['playerId'])
-    App.socketio.emit('roomEvent', {'state': f'{data["playerId"]} has moved'}, broadcast=True, room=data['lobbyId'], to=data['lobbyId'])
+    App.socketio.emit('playerEvent', {
+        'card': card,
+        'tile': data['tile'],
+        'playerNumHeldCards': game['players'][data['playerId']]['numHeldCards'],
+        'playerId': data['playerId']
+    }, broadcast=False, room=data['lobbyId'], to=data['playerId'])
+    #App.socketio.emit('roomEvent', {'state': 'noise' if 'silence' not in card else 'silence', 'player': data["playerId"], 'playerNumHeldCards': game['players']['playerId']['numHeldCards']}, broadcast=True, room=data['lobbyId'], to=data['lobbyId'])
+
+
+@App.socketio.on('noiseInSector')
+def broadcast_noise_in_sector(data):
+    App.socketio.emit('roomEvent', {
+        'state': data['state'],
+        'tile': data['tile'],
+        'player': data["playerId"],
+        'playerNumHeldCards': data['numHeldCards']
+    }, broadcast=True, room=data['lobbyId'], to=data['lobbyId'])
 
 
 def game_engine(room_id, players):
@@ -236,14 +254,18 @@ def game_engine(room_id, players):
         aspawn = [key for key, value in map_tiles.items() if value['tileType'] == 'aspawn'][0]
         hspawn = [key for key, value in map_tiles.items() if value['tileType'] == 'hspawn'][0]
 
+        players_dict = {}
+
         for player in players:
             role = roles.pop()
             player['role'] = role
             player['pos'] = aspawn if role == 'alien' else hspawn
             player['maxMovement'] = 2 if role == 'alien' else 1
             player['kills'] = 0
+            player['numHeldCards'] = 0
             #player['status'] = 'alive'
 
+            players_dict[player['playerName']] = player
             App.socketio.emit('roleAssignment', {'player': player}, to=player['playerName'])
 
         game_sessions[room_id] = {
@@ -253,7 +275,7 @@ def game_engine(room_id, players):
                 'aspawn': aspawn,
                 'hspawn': hspawn
             },
-            'players': players,
+            'players': players_dict, #players,
             'danger_cards': dangerous_tile_deck
         }
 
