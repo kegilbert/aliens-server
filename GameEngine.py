@@ -120,11 +120,7 @@ def game_start(data):
 
     join_room(data['roomCode'])
 
-    #t = threading.Thread(target=game_engine, args=(data['roomCode'], data['players']))
-    #t.start()
     App.socketio.start_background_task(game_engine, room_id=data['roomCode'], players=data['players'])
-
-    #App.socketio.emit('gameStartResp', broadcast=True, include_self=True, room=data['roomCode'])
     App.socketio.emit('gameStartResp', to=data['roomCode'])
 
 
@@ -154,15 +150,28 @@ def disconnect():
 #################################################################
 @App.socketio.on('tileClick')
 def on_tile_click(data):
-    App.socketio.emit('playerEvent', {'event': f'YOU CLICKED ON {data["tile"]}'}, to=data['playerId'])
-    App.socketio.emit('playerEvent', {'event': f'PLAYER {data["playerId"]} CLICKED ON <REDACTED>'}, to=data['lobbyId'])
+    return
+    #App.socketio.emit('playerEvent', {'event': f'YOU CLICKED ON {data["tile"]}'}, to=data['playerId'])
+    #App.socketio.emit('playerEvent', {'event': f'PLAYER {data["playerId"]} CLICKED ON <REDACTED>'}, to=data['lobbyId'])
     #App.socketio.emit('playerEvent', {'event': f'PLAYER {data["playerId"]} CLICKED ON <REDACTED>'}, room=data['lobbyId'], broadcast=True)
 
 
 @App.socketio.on('turnSubmit')
 def turn_submit(data):
-    print(data)
-    App.socketio.emit('playerEvent', {'state': 'Private message just for you!'}, broadcast=False, room=data['lobbyId'], to=data['playerId'])
+    global game_sessions
+    game = game_sessions[data['lobbyId']]
+
+    # TODO: Check if this movement is an attack. Do not try tile card on attack
+    if (data['tileType'] == 'dangerous'):
+        if len(game['danger_cards']) == 0:
+            game['danger_cards'] = ['noise', 'any'] * 27
+            random.shuffle(game['danger_cards'])
+
+        card = game['danger_cards'].pop()
+    else:
+        card = 'silence'
+
+    App.socketio.emit('playerEvent', {'state': card}, broadcast=False, room=data['lobbyId'], to=data['playerId'])
     App.socketio.emit('roomEvent', {'state': f'{data["playerId"]} has moved'}, broadcast=True, room=data['lobbyId'], to=data['lobbyId'])
 
 
@@ -179,6 +188,40 @@ def game_engine(room_id, players):
         # 50/50 aliens/humans, majority aliens in case of odd number of players
         roles = ['alien' if i < role_div else 'human' for i in range(0, num_players)]
         random.shuffle(roles)
+
+        # Generate and shuffle tile deck
+        # 27 Noise in any sector
+        # 27 Noise in your sector
+        # 6  Silence
+        # TODO: 17 Item cards (silence)
+        #       - 3 Adrenaline
+        #       - 1 Teleport
+        #       - 2 Attack
+        #       - 3 Sedatives
+        #       - 1 Defence
+        #       - 2 Cats
+        #       - 1 Mutation
+        #       - 1 Sensor
+        #       - 1 Clone
+        #       - 2 Spotlights
+        # Rule book specifies only shuffling the noise danger cards back into the pile after running out. 
+        # Silence/Item cards are kept in front of players, noise cards are discarded. Used item cards are flipped and kept in front of you
+        dangerous_tile_deck = (
+            (['noise', 'any'] * 27)        +
+            (['silence'] * 6)              + 
+            (['silence - adrenaline'] * 3) +
+            (['silence - teleport'])       +
+            (['silence - attack'] * 2)     +
+            (['silence - sedative'] * 3)   +
+            (['silence - defense'])        +
+            (['silence - cat'] * 2)        +
+            (['silence - mutation'])       +
+            (['silence - sensor'])         +
+            (['silence - clone'])          +
+            (['silence - spotlight'] * 2)  
+        )
+        
+        random.shuffle(dangerous_tile_deck)
 
         lobby_idx, lobby = App.lobby_lookup_by_id(room_id)
         map_label = lobby['mapLabel']
@@ -210,12 +253,8 @@ def game_engine(room_id, players):
                 'aspawn': aspawn,
                 'hspawn': hspawn
             },
-            'players': players
-            # 'players': [{
-            #     'id':  player['playerName'],
-            #     'pos': aspawn if player['role'] == 'alien' else hspawn,
-            #     'status': 'alive'
-            # } for player in players]
+            'players': players,
+            'danger_cards': dangerous_tile_deck
         }
 
         pprint(game_sessions)
