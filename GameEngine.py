@@ -176,7 +176,7 @@ def turn_submit(data):
 
     App.socketio.emit('playerEvent', {
         'card': card,
-        'tile': data['tile'],
+        'tile': data['tile'] if card != 'any' else '',
         'playerNumHeldCards': game['players'][data['playerId']]['numHeldCards'],
         'playerId': data['playerId']
     }, broadcast=False, room=data['lobbyId'], to=data['playerId'])
@@ -186,11 +186,11 @@ def turn_submit(data):
 @App.socketio.on('noiseInSector')
 def broadcast_noise_in_sector(data):
     App.socketio.emit('roomEvent', {
-        'state': data['state'],
+        'card': data['state'],
         'tile': data['tile'],
-        'player': data["playerId"],
+        'playerId': data['playerId'],
         'playerNumHeldCards': data['numHeldCards']
-    }, broadcast=True, room=data['lobbyId'], to=data['lobbyId'])
+    }, broadcast=True, room=data['lobbyId'], to=data['lobbyId'], include_self=False)
 
 
 def game_engine(room_id, players):
@@ -225,7 +225,7 @@ def game_engine(room_id, players):
         # Rule book specifies only shuffling the noise danger cards back into the pile after running out. 
         # Silence/Item cards are kept in front of players, noise cards are discarded. Used item cards are flipped and kept in front of you
         dangerous_tile_deck = (
-            (['noise', 'any'] * 27)        +
+            (['any', 'any'] * 27)        +
             (['silence'] * 6)              + 
             (['silence - adrenaline'] * 3) +
             (['silence - teleport'])       +
