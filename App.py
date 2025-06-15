@@ -128,45 +128,9 @@ def get_map_list(data):
     emit('emitMapList', map_list)
 
 
-# # Old method, not really sure why I would store lobbies in the DB though as they're pretty transient...
-# @socketio.on('getLobbiesDB')
-# def get_lobbies(data):
-#     # lobbies_list.append({
-#     #     'lobbyId': lobby['lobbyID'],
-#     #     'lobbyName': lobby['name'],
-#     #     'numPlayers': len(lobby['playerList'].split(',')),
-#     #     'players': [{'playerName': player, 'playerReady': False} for player in lobby['playerList'].split(',')],
-#     #     'private': lobby['password'] != '',
-#     #     #'password': lobby['password']
-#     # })
-
-#     emit('lobbiesList', lobies)
-
-
 @socketio.on('getLobbies')
 def get_lobbies(data):
     emit('lobbiesList', lobbies)
-
-
-# @socketio.on('createLobby')
-# def create_lobby(data):
-#     db = sqlite3.connect('aliens.db')
-#     db.row_factory = row_to_dict
-#     db_cursor = db.cursor()   
-
-#     curr_time = datetime.datetime.now().timestamp()
-#     lobby_df = pd.DataFrame(data={
-#       'lobbyID': data['lobbyId'],
-#       'name': data['lobbyName'],
-#       'password': data['lobbyPW'],
-#       'map': '',
-#       'playerList': f'{data["creatorPlayer"]}',
-#       'timestamp': curr_time
-#     }, index=[0])
-
-#     lobby_df.to_sql(f'Lobbies', db, if_exists='append', index=False)
-
-#     get_lobbies({})
 
 
 @socketio.on('setLobbyMap')

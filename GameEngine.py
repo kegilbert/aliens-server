@@ -15,6 +15,7 @@ from flask import Flask, render_template, jsonify, request
 from flask_socketio import SocketIO, send, emit, join_room, close_room
 from flask_cors import CORS, cross_origin
 
+from collections import OrderedDict
 from time import sleep
 
 import __main__ as App
@@ -183,15 +184,26 @@ def turn_submit(data):
     #App.socketio.emit('roomEvent', {'state': 'noise' if 'silence' not in card else 'silence', 'player': data["playerId"], 'playerNumHeldCards': game['players']['playerId']['numHeldCards']}, broadcast=True, room=data['lobbyId'], to=data['lobbyId'])
 
 
+def set_next_player(lobbyId):
+    session = game_sessions[lobbyId]
+    player_list = list(session['players'])
+    session['current_player_idx'] = (session['current_player_idx'] + 1) % len(player_list)
+    session['current_player'] = player_list[session['current_player_idx']]
+    return session['current_player']
+
+
 @App.socketio.on('noiseInSector')
 def broadcast_noise_in_sector(data):
+    currPlayer = set_next_player(data['lobbyId'])
     App.socketio.emit('roomEvent', {
         'card': data['state'],
         'tile': data['tile'],
         'playerId': data['playerId'],
         'playerNumHeldCards': data['numHeldCards']
-    }, broadcast=True, room=data['lobbyId'], to=data['lobbyId'], include_self=False)
-
+    }, broadcast=True, room=data['lobbyId'], to=data['lobbyId'], include_self=data['includeSelf'])
+    App.socketio.emit('updateCurrentPlayer', {
+        'currPlayer': currPlayer
+    }, broadcast=True, room=data['lobbyId'], to=data['lobbyId'], include_self=True)
 
 def game_engine(room_id, players):
     try:
@@ -225,7 +237,7 @@ def game_engine(room_id, players):
         # Rule book specifies only shuffling the noise danger cards back into the pile after running out. 
         # Silence/Item cards are kept in front of players, noise cards are discarded. Used item cards are flipped and kept in front of you
         dangerous_tile_deck = (
-            (['any', 'any'] * 27)        +
+            (['noise', 'any'] * 27)        +
             (['silence'] * 6)              + 
             (['silence - adrenaline'] * 3) +
             (['silence - teleport'])       +
@@ -254,8 +266,9 @@ def game_engine(room_id, players):
         aspawn = [key for key, value in map_tiles.items() if value['tileType'] == 'aspawn'][0]
         hspawn = [key for key, value in map_tiles.items() if value['tileType'] == 'hspawn'][0]
 
-        players_dict = {}
+        players_dict = OrderedDict()
 
+        random.shuffle(players)
         for player in players:
             role = roles.pop()
             player['role'] = role
@@ -276,8 +289,15 @@ def game_engine(room_id, players):
                 'hspawn': hspawn
             },
             'players': players_dict, #players,
+            'current_player': next(iter(players_dict)),  # Returns first key (playerID in this case)
+            'current_player_idx': 0,
             'danger_cards': dangerous_tile_deck
         }
+        App.socketio.emit('turnOrder',
+            {'turnOrder': list(players_dict.keys()), 'currPlayer': game_sessions[room_id]['current_player']},
+            broadcast=True,
+            room=room_id, to=room_id
+        )
 
         pprint(game_sessions)
 
