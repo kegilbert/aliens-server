@@ -163,24 +163,47 @@ def turn_submit(data):
     game = game_sessions[data['lobbyId']]
 
     # TODO: Check if this movement is an attack. Do not try tile card on attack
-    if (data['tileType'] == 'dangerous'):
+    playerId = data['playerId']
+    lobbyId  = data['lobbyId']
+    tile     = data['tile']
+    tileType = data['tileType']
+    
+    game['players'][playerId]['pos'] = tile
+
+    for player, meta in game['players'].items():
+        if player != playerId and meta['pos'] == tile and game['players'][playerId]['role'] == 'alien':
+            # Attack sequence
+            game['players'][player]['status'] = 'dead'
+
+            App.socketio.emit('playerEvent', {
+                'card': 'attack',
+                'tile': tile,
+                'playerNumHeldCards': game['players'][playerId]['numHeldCards'],
+                'playerId': playerId,
+                'targetPlayer': player
+            }, room=lobbyId, to=lobbyId, include_self=True)
+
+            return
+
+    print('Continue')
+    if (tileType == 'dangerous'):
         if len(game['danger_cards']) == 0:
             game['danger_cards'] = ['noise', 'any'] * 27
             random.shuffle(game['danger_cards'])
-            App.socketio.emit('roomEvent', {'state': 'deckShuffled'}, broadcast=True, room=data['lobbyId'], to=data['lobbyId'])
+            App.socketio.emit('roomEvent', {'state': 'deckShuffled'}, room=lobbyId, to=lobbyId)
 
         card = game['danger_cards'].pop()
         if 'silence' in card:
-            game['players'][data['playerId']]['numHeldCards'] += 1
+            game['players'][playerId]['numHeldCards'] += 1
     else:
         card = 'silence'
 
     App.socketio.emit('playerEvent', {
         'card': card,
-        'tile': data['tile'] if card != 'any' else '',
-        'playerNumHeldCards': game['players'][data['playerId']]['numHeldCards'],
-        'playerId': data['playerId']
-    }, broadcast=False, room=data['lobbyId'], to=data['playerId'])
+        'tile': tile if card != 'any' else '',
+        'playerNumHeldCards': game['players'][playerId]['numHeldCards'],
+        'playerId': playerId
+    }, room=lobbyId, to=playerId)
     #App.socketio.emit('roomEvent', {'state': 'noise' if 'silence' not in card else 'silence', 'player': data["playerId"], 'playerNumHeldCards': game['players']['playerId']['numHeldCards']}, broadcast=True, room=data['lobbyId'], to=data['lobbyId'])
 
 
@@ -200,10 +223,10 @@ def broadcast_noise_in_sector(data):
         'tile': data['tile'],
         'playerId': data['playerId'],
         'playerNumHeldCards': data['numHeldCards']
-    }, broadcast=True, room=data['lobbyId'], to=data['lobbyId'], include_self=data['includeSelf'])
+    }, room=data['lobbyId'], to=data['lobbyId'], include_self=data['includeSelf'])
     App.socketio.emit('updateCurrentPlayer', {
         'currPlayer': currPlayer
-    }, broadcast=True, room=data['lobbyId'], to=data['lobbyId'], include_self=True)
+    }, room=data['lobbyId'], to=data['lobbyId'], include_self=True)
 
 def game_engine(room_id, players):
     try:
@@ -276,7 +299,7 @@ def game_engine(room_id, players):
             player['maxMovement'] = 2 if role == 'alien' else 1
             player['kills'] = 0
             player['numHeldCards'] = 0
-            #player['status'] = 'alive'
+            player['status'] = 'alive'
 
             players_dict[player['playerName']] = player
             App.socketio.emit('roleAssignment', {'player': player}, to=player['playerName'])
