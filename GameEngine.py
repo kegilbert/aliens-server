@@ -70,7 +70,8 @@ def new_lobby(data):
             'players': [{'playerName': data['creatorPlayer'], 'playerReady': False}],
             'host': data['creatorPlayer'],
             'mapLabel': '',
-            'private': data['lobbyPW'] != ''
+            'private': data['lobbyPW'] != '',
+            'inProgress': False
         })
 
     if data['lobbyPW'] != '':
@@ -120,9 +121,13 @@ def game_start(data):
     print(data)
 
     join_room(data['roomCode'])
+    
+    lobby_idx, lobby = App.lobby_lookup_by_id(data['roomCode'])
+    App.lobbies[lobby_idx]['inProgress'] = True
 
     App.socketio.start_background_task(game_engine, room_id=data['roomCode'], players=data['players'])
     App.socketio.emit('gameStartResp', to=data['roomCode'])
+    App.socketio.emit('lobbiesList', App.lobbies)
 
 
 
@@ -131,19 +136,23 @@ def game_start(data):
 #################################################################
 @App.socketio.on('disconnect')
 def disconnect():
-    user_name = App.users.inverse[request.sid]
+    try:
+        user_name = App.users.inverse[request.sid]
 
-    print(f'User {user_name} Disconnecting')
-    unregister_room(user_name, 'user')
+        print(f'User {user_name} Disconnecting')
+        unregister_room(user_name, 'user')
 
-    for lobby_idx, lobby in enumerate(App.lobbies):
-        players = [player['playerName'] for player in lobby['players']]
-        if user_name in players:
-            player_idx = players.index(user_name)
-            del App.lobbies[lobby_idx]['players'][player_idx]
+        for lobby_idx, lobby in enumerate(App.lobbies):
+            players = [player['playerName'] for player in lobby['players']]
+            if user_name in players:
+                player_idx = players.index(user_name)
+                del App.lobbies[lobby_idx]['players'][player_idx]
 
-    del App.users.inverse[request.sid]
-    App.socketio.emit('lobbiesList', App.lobbies)
+        del App.users.inverse[request.sid]
+        App.socketio.emit('lobbiesList', App.lobbies)
+    except Exception as e:
+        print(f'[disconnect handler] Failed to handle disconnect event: {e}')
+        pass
 
 
 #################################################################
@@ -163,6 +172,8 @@ def turn_submit(data):
     attack_flag = False
     game = game_sessions[data['lobbyId']]
 
+    pprint(data)
+
     # TODO: Check if this movement is an attack. Do not try tile card on attack
     playerId = data['playerId']
     lobbyId  = data['lobbyId']
@@ -172,7 +183,7 @@ def turn_submit(data):
     game['players'][playerId]['pos'] = tile
 
     for player, meta in game['players'].items():
-        if player != playerId and meta['pos'] == tile and game['players'][playerId]['role'] == 'alien':
+        if player != playerId and meta['pos'] == tile and game['players'][playerId]['role'] == 'alien' and meta['status'] == 'alive':
             # Attack sequence
             game['players'][player]['status'] = 'dead'
 
@@ -183,11 +194,17 @@ def turn_submit(data):
                 'playerId': playerId,
                 'targetPlayer': player
             }, room=lobbyId, to=lobbyId, include_self=True)
+            App.socketio.sleep(0)   # Flush events
 
             attack_flag = True
 
     if not attack_flag:
-        if (tileType == 'dangerous'):
+        if (tileType == 'escapepod') and game['players'][playerId]['role'] == 'human':
+            card = game['escapepod_cards'].pop()
+
+            if card == 'successful_escape':
+                game['players'][player]['status'] = 'escaped'
+        elif (tileType == 'dangerous'):
             if len(game['danger_cards']) == 0:
                 game['danger_cards'] = ['noise', 'any'] * 27
                 random.shuffle(game['danger_cards'])
@@ -213,6 +230,9 @@ def set_next_player(lobbyId):
     player_list = list(session['players'])
     session['current_player_idx'] = (session['current_player_idx'] + 1) % len(player_list)
     session['current_player'] = player_list[session['current_player_idx']]
+    while session['players'][session['current_player']]['status'] != 'alive':
+        session['current_player_idx'] = (session['current_player_idx'] + 1) % len(player_list)
+        session['current_player'] = player_list[session['current_player_idx']]  
     return session['current_player']
 
 
@@ -274,8 +294,13 @@ def game_engine(room_id, players):
             (['silence - clone'])          +
             (['silence - spotlight'] * 2)  
         )
-        
         random.shuffle(dangerous_tile_deck)
+
+        escapepod_tile_deck = (
+            (['successful_escape'] * 4)  +
+            (['damaged_escapepod'])
+        )
+        random.shuffle(escapepod_tile_deck)
 
         lobby_idx, lobby = App.lobby_lookup_by_id(room_id)
         map_label = lobby['mapLabel']
@@ -315,7 +340,8 @@ def game_engine(room_id, players):
             'players': players_dict, #players,
             'current_player': next(iter(players_dict)),  # Returns first key (playerID in this case)
             'current_player_idx': 0,
-            'danger_cards': dangerous_tile_deck
+            'danger_cards': dangerous_tile_deck,
+            'escapepod_cards': escapepod_tile_deck
         }
         App.socketio.emit('turnOrder',
             {'turnOrder': list(players_dict.keys()), 'currPlayer': game_sessions[room_id]['current_player']},
